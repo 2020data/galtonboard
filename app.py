@@ -1,76 +1,179 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import norm
-import math
+import time
 
-# 設定頁面標題
-st.set_page_config(page_title="高爾頓板模擬器", layout="centered")
+# 設定頁面標題與佈局
+st.set_page_config(page_title="動態高爾頓板模擬器", layout="centered")
 
-st.title("高爾頓板 (Galton Board) 模擬")
-
-# 插入描述與原理解釋
-st.markdown("""
-> **高爾頓板（Galton board）**是由一塊帶有交錯排列釘子的直立板塊所構成。當裝置保持水平時，從頂部丟下珠子，珠子在撞擊釘子時會隨機向左或向右彈跳。最終它們會收集在底部的凹槽中，累積在凹槽裡的珠子圓柱高度會近似於**鐘形曲線（常態分佈）**。
-> 
-> 將**帕斯卡三角形（Pascal's triangle）**疊加在釘子上，可以顯示出到達每個凹槽的不同路徑數量。
-""")
+st.title("高爾頓板 (Galton Board) 動態模擬 🎰")
+st.markdown("觀察滾珠如何一顆顆穿梭在釘陣中，最終以「物理堆疊」的方式形成常態分佈（鐘形曲線）。")
 
 st.divider()
 
-# 側邊欄控制參數
+# 側邊欄控制面板
 st.sidebar.header("控制面板")
-levels = st.sidebar.slider("釘子層數 (Rows of pegs)", min_value=3, max_value=50, value=15, step=1)
-beads = st.sidebar.slider("珠子總數 (Number of beads)", min_value=100, max_value=50000, value=10000, step=500)
+levels = st.sidebar.slider("釘子層數 (Rows of pegs)", min_value=5, max_value=15, value=10, step=1)
 
-# --- 模擬核心邏輯 ---
-# 每顆珠子在每一層都有 50% 的機率向右跳。向右跳的總次數即為最後落入的凹槽索引。
-# 這是一個典型的二項式分佈 (Binomial Distribution)，可透過 numpy 快速模擬。
-final_positions = np.random.binomial(levels, 0.5, beads)
+# 動畫與數量設定
+animate = st.sidebar.checkbox("開啟掉落動畫 (較耗效能)", value=True)
+if animate:
+    beads = st.sidebar.slider("珠子總數", min_value=50, max_value=400, value=200, step=10)
+    st.sidebar.caption("💡 提示：開啟動畫時，為確保順暢度，珠子數量上限設為 400。")
+else:
+    beads = st.sidebar.slider("珠子總數", min_value=100, max_value=2000, value=800, step=100)
 
-# --- 繪圖 ---
-fig, ax = plt.subplots(figsize=(10, 6))
-
-# 繪製直方圖 (代表底部的凹槽與累積的珠子)
-bins = np.arange(-0.5, levels + 1.5, 1)
-counts, edges, patches = ax.hist(
-    final_positions, 
-    bins=bins, 
-    rwidth=0.8, 
-    color='#4C92C3', 
-    edgecolor='black', 
-    alpha=0.8, 
-    label='模擬珠子分佈'
+# 材質顏色選擇
+color_choice = st.sidebar.selectbox(
+    "滾珠款式 (金屬質感)", 
+    ["黃金 (Gold)", "白銀 (Silver)", "青銅 (Bronze)", "紅寶石 (Ruby)", "藍寶石 (Sapphire)", "翡翠 (Emerald)"]
 )
 
-# 繪製理論上的常態分佈曲線 (鐘形曲線)
-mu = levels / 2.0                 # 平均值
-sigma = math.sqrt(levels) / 2.0   # 標準差
-x = np.linspace(0, levels, 200)
-# 將 PDF 乘上珠子總數以匹配直方圖的刻度
-y = norm.pdf(x, mu, sigma) * beads 
-ax.plot(x, y, 'r-', lw=3, label='理論鐘形曲線 (Bell Curve)')
+# 顏色代碼映射表
+color_map = {
+    "黃金 (Gold)": "#FFD700",
+    "白銀 (Silver)": "#E0E0E0",
+    "青銅 (Bronze)": "#CD7F32",
+    "紅寶石 (Ruby)": "#E52B50",
+    "藍寶石 (Sapphire)": "#0F52BA",
+    "翡翠 (Emerald)": "#50C878"
+}
+base_color = color_map[color_choice]
 
-ax.set_title(f"丟下 {beads} 顆珠子後的結果", fontsize=16)
-ax.set_xlabel("凹槽編號 (向右彈跳的次數)", fontsize=12)
-ax.set_ylabel("珠子數量", fontsize=12)
-ax.set_xticks(range(0, levels + 1))
-ax.legend()
-ax.grid(axis='y', linestyle='--', alpha=0.7)
+if st.button("🚀 開始投放滾珠"):
+    # --- 1. 計算物理路徑與最終位置 ---
+    paths = np.zeros((beads, levels + 1))
+    for i in range(beads):
+        # 每一層有一半機率向左(-0.5)或向右(+0.5)
+        steps = np.random.choice([-0.5, 0.5], size=levels)
+        paths[i, 1:] = np.cumsum(steps)
+        
+    final_bins = paths[:, -1]
+    
+    # 計算每個凹槽的堆疊高度 (為了讓珠子疊起來)
+    stack_idx = np.zeros(beads)
+    current_counts = {}
+    for i in range(beads):
+        b = final_bins[i]
+        if b not in current_counts:
+            current_counts[b] = 0
+        stack_idx[i] = current_counts[b]
+        current_counts[b] += 1
+        
+    max_stack = max(current_counts.values()) if current_counts else 0
 
-# 在 Streamlit 顯示圖表
-st.pyplot(fig)
+    # --- 2. 準備 Matplotlib 暗色畫布 ---
+    fig, ax = plt.subplots(figsize=(9, 7))
+    # 使用深色背景讓金屬光澤更顯眼
+    fig.patch.set_facecolor('#1E1E1E') 
+    ax.set_facecolor('#1E1E1E')
+    
+    # 計算畫面顯示邊界
+    x_max = levels / 2.0 + 1
+    y_max = 1
+    # 底部要留夠空間給最高的那一疊珠子
+    y_min = -levels - (max_stack * 0.9) - 1.5 
+    
+    # 預先生成靜態的「釘子」座標
+    peg_x, peg_y = [], []
+    for r in range(levels):
+        for i in range(r + 1):
+            peg_x.append(i - r / 2.0)
+            peg_y.append(-r)
+            
+    plot_placeholder = st.empty()
 
-# --- 帕斯卡三角形路徑數 ---
-st.subheader("帕斯卡三角形與路徑數")
-st.markdown(f"當珠子穿過 **{levels}** 層釘子時，到達第 $k$ 個凹槽的路徑總數剛好等於帕斯卡三角形第 {levels} 層的組合數 $C({levels}, k)$：")
+    # 視覺參數：珠子大小與金屬反光偏移量
+    bead_size = 140
+    highlight_size = 30
+    offset = 0.09 
+    
+    if animate:
+        # --- 動態掉落運算 ---
+        drop_rate = max(1, beads // 35) # 控制一次掉落幾顆，避免動畫太久
+        fall_speed = 0.6                # 落入凹槽的垂直降落速度
+        max_steps = (beads // drop_rate) + levels + int((max_stack * 0.9) / fall_speed) + 5
+        
+        # 預先計算每一幀所有珠子的座標 (填入 NaN 代表還沒出現)
+        X = np.full((beads, max_steps), np.nan)
+        Y = np.full((beads, max_steps), np.nan)
+        
+        progress_bar = st.progress(0)
+        
+        for i in range(beads):
+            t_start = i // drop_rate
+            
+            # 第一階段：在釘子間彈跳
+            for k in range(levels + 1):
+                t_curr = t_start + k
+                if t_curr < max_steps:
+                    X[i, t_curr] = paths[i, k]
+                    Y[i, t_curr] = -k
+                    
+            # 第二階段：落入底部凹槽並向上堆疊
+            bin_x = paths[i, levels]
+            final_y = -levels - 0.5 - (stack_idx[i] * 0.9)
+            
+            fall_dist = abs(-levels - final_y)
+            fall_frames = int(fall_dist / fall_speed) + 1
+            
+            for f in range(1, fall_frames + 1):
+                t_curr = t_start + levels + f
+                if t_curr < max_steps:
+                    X[i, t_curr] = bin_x
+                    Y[i, t_curr] = max(-levels - f * fall_speed, final_y)
+                    
+            # 第三階段：乖乖停在堆疊位置
+            t_rest = t_start + levels + fall_frames + 1
+            if t_rest < max_steps:
+                X[i, t_rest:] = bin_x
+                Y[i, t_rest:] = final_y
 
-# 計算路徑組合數
-paths = [math.comb(levels, k) for k in range(levels + 1)]
+        # --- 播放動畫 ---
+        for t in range(0, max_steps):
+            ax.clear()
+            ax.set_xlim(-x_max, x_max)
+            ax.set_ylim(y_min, y_max)
+            ax.axis('off') # 隱藏坐標軸，營造純物理展示的感覺
+            
+            # 畫出釘陣 (白色, 半透明)
+            ax.scatter(peg_x, peg_y, color='white', s=25, alpha=0.4, zorder=1)
+            
+            # 找出當前畫面存在的珠子
+            curr_x = X[:, t]
+            curr_y = Y[:, t]
+            valid = ~np.isnan(curr_x)
+            
+            if np.any(valid):
+                vx = curr_x[valid]
+                vy = curr_y[valid]
+                
+                # 1. 繪製珠子主體 (帶黑框)
+                ax.scatter(vx, vy, color=base_color, s=bead_size, edgecolors='black', linewidth=0.8, zorder=2)
+                # 2. 繪製金屬反光高光 (向左上偏移的白色亮點)
+                ax.scatter(vx - offset, vy + offset, color='white', s=highlight_size, alpha=0.7, zorder=3)
+                
+            plot_placeholder.pyplot(fig)
+            progress_bar.progress(min(1.0, (t + 1) / max_steps))
+            
+        progress_bar.empty()
 
-# 將數據格式化為容易閱讀的長字串或表格
-paths_str = " | ".join([f"**凹槽 {k}**: {p} 條" for k, p in enumerate(paths)])
-st.info(paths_str)
+    else:
+        # --- 靜態直接顯示模式 ---
+        ax.set_xlim(-x_max, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.axis('off')
+        
+        ax.scatter(peg_x, peg_y, color='white', s=25, alpha=0.4, zorder=1)
+        
+        # 準備所有珠子的最終座標
+        final_x = paths[:, -1]
+        final_y = -levels - 0.5 - (stack_idx * 0.9)
+        
+        # 繪製金屬質感珠子
+        ax.scatter(final_x, final_y, color=base_color, s=bead_size, edgecolors='black', linewidth=0.8, zorder=2)
+        ax.scatter(final_x - offset, final_y + offset, color='white', s=highlight_size, alpha=0.7, zorder=3)
+        
+        plot_placeholder.pyplot(fig)
 
-total_paths = sum(paths)
-st.write(f"**總路徑數**：$2^{{{levels}}} = {total_paths:,}$ 條可能路徑。")
+    st.success("🎉 模擬完成！滾珠精準地堆疊出了常態分佈。")
